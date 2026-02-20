@@ -1,0 +1,36 @@
+# Переменные окружения
+.env
+.env.local
+
+# Токены и ключи
+*.token
+*.key
+*.secret
+
+# Логи
+logs/
+*.log
+
+# Данные пользователей
+previous_ratings.json
+user_data.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
