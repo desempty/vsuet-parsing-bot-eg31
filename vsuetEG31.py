@@ -356,7 +356,7 @@ def fetch_rating_from_site(object_index, student_id):
         response = requests.get(
             url,
             headers={"User-Agent": random.choice(USER_AGENTS)},
-            timeout=40 # Ожидание в 40 секунд для загрузки всего HTML-кода
+            timeout=15 # Ожидание в 15 секунд для загрузки всего HTML-кода
         )
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
@@ -382,6 +382,12 @@ def create_main_menu_markup():
     markup.add("Отмена")
     return markup
 
+# 2.9 Функция для проверки времени
+def is_site_available():
+    now = datetime.now(moscow_tz).hour
+    return 10 <= now < 19
+
+
 # 3. ФУНКЦИИ МОНИТОРИНГА
 
 # 3.1. Для отправки уведомлений в случае 
@@ -405,9 +411,7 @@ def send_change_notification(chat_id, subject_name, student_id, changes):
 # 3.1 Для проверки изменений рейтинга всех подписанных на уведомления пользователей
 def check_rating_changes():
     
-    now = datetime.now(moscow_tz)
-    current_hour = now.hour
-    if current_hour >= 19 or current_hour < 10:
+    if not is_site_available():
         logger.info("Ночное время (19:00-10:00 MSK) — мониторинг приостановлен")
         return
 
@@ -496,9 +500,11 @@ def monitoring_thread():
             with data_lock:
                 has_subscriptions = bool(user_subscriptions)
             
-            if has_subscriptions:
+            if has_subscriptions and is_site_available():
                 check_rating_changes()
-            time.sleep(CONFIG["CHECK_INTERVAL"])
+            
+            time.sleep(CONFIG["CHECK_INTERVAL"])    
+
         except Exception as e:
             logger.error(f"Ошибка в потоке мониторинга: {e}")
             time.sleep(60)
@@ -592,6 +598,24 @@ def handle_student_id_first(message):
     """Обработчик ввода номера студента"""
     chat_id = message.chat.id
     student_id = message.text.strip()
+
+    
+    # ПРЕДУПРЕЖДЕНИЕ О НОЧНОМ ВРЕМЕНИ
+    if not is_site_available():
+        try:
+
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+            markup.row("Выбрать другой предмет", "Отмена")
+
+            bot.send_message(
+                chat_id,
+                "Сайт рейтинга недоступен с 19:00 до 09:00.\n"
+                "Попробуйте запросить данные днём.",
+                reply_markup=markup
+            )
+        except Exception as e:
+            logger.error(f"Ошибка отправки сообщения: {e}")
+        return
     
     update_activity(chat_id)
     
@@ -672,9 +696,7 @@ def handle_subject_choice_after_id(message):
     update_activity(chat_id)
 
     # ПРЕДУПРЕЖДЕНИЕ О НОЧНОМ ВРЕМЕНИ
-    now = datetime.now(moscow_tz)
-    current_hour = now.hour
-    if current_hour >= 19 or current_hour < 10:
+    if not is_site_available():
         try:
 
             markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
