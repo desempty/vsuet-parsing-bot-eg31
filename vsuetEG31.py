@@ -689,132 +689,114 @@ def handle_student_id_first(message):
     user_state[message.chat.id] == "choosing_subject_after_id"
 )
 def handle_subject_choice_after_id(message):
-
     chat_id = message.chat.id
-    text = message.text.strip()
+    text = message.text.strip().lower()
 
     update_activity(chat_id)
 
-    # ПРЕДУПРЕЖДЕНИЕ О НОЧНОМ ВРЕМЕНИ
-    if not is_site_available():
-        try:
+    if text == "выбрать другой предмет":
+        bot.send_message(
+            chat_id,
+            create_subject_menu_text(),
+            reply_markup=create_subject_keyboard()
+        )
+        return
 
-            markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-            markup.row("Выбрать другой предмет", "Отмена")
-
-            bot.send_message(
-                chat_id,
-                "Сайт рейтинга недоступен с 19:00 до 09:00.\n"
-                "Попробуйте запросить данные днём.",
-                reply_markup=markup
-            )
-        except Exception as e:
-            logger.error(f"Ошибка отправки сообщения: {e}")
+    if text == "отмена":
+        cleanup_on_exit(chat_id)
+        bot.send_message(
+            chat_id,
+            "Возврат в главное меню",
+            reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("Начать")
+        )
         return
 
     with data_lock:
-        has_session = chat_id in user_selected_data and "student_id" in user_selected_data[chat_id]
-    
+        has_session = (
+            chat_id in user_selected_data and
+            "student_id" in user_selected_data[chat_id]
+        )
+
     if not has_session:
-        try:
-            bot.send_message(
-                chat_id,
-                "Сессия устарела. Пожалуйста, начните заново командой /start",
-                reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("Начать")
-            )
-        except Exception as e:
-            logger.error(f"Ошибка отправки сообщения: {e}")
+        bot.send_message(
+            chat_id,
+            "Сессия устарела. Пожалуйста, начните заново командой /start",
+            reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("Начать")
+        )
         return
-    
-    if text.lower() == "выбрать другой предмет":
-        try:
-            bot.send_message(
-                chat_id,
-                create_subject_menu_text(),
-                reply_markup=create_subject_keyboard()
-            )
-        except Exception as e:
-            logger.error(f"Ошибка отправки сообщения: {e}")
+
+    if not is_site_available():
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.row("Выбрать другой предмет", "Отмена")
+
+        bot.send_message(
+            chat_id,
+            "Сайт рейтинга недоступен с 19:00 до 09:00.\nПопробуйте днём.",
+            reply_markup=markup
+        )
         return
-    
-    if text.lower() == "отмена":
-        cleanup_on_exit(chat_id)
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True).add("Начать")
-        try:
-            bot.send_message(chat_id, "Возврат в главное меню", reply_markup=markup)
-        except Exception as e:
-            logger.error(f"Ошибка отправки сообщения: {e}")
-        return
-    
+
     try:
         choice = int(text)
-        
-        if 1 <= choice <= len(DICT_SUBJECT):
-            with data_lock:
-                student_id = user_selected_data[chat_id]["student_id"]
-            
-            subject_name = list(DICT_SUBJECT.keys())[choice - 1]
-            object_index = DICT_SUBJECT[subject_name]
-            
-            try:
-                bot.send_message(
-                    chat_id,
-                    "Загружаем данные с сайта... \nЭто займёт около 5 секунд",
-                    reply_markup=types.ReplyKeyboardRemove()
-                )
-            except Exception as e:
-                logger.error(f"Ошибка отправки сообщения: {e}")
-            
-            data = fetch_rating_from_site(object_index, student_id)
-            
-            markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-            markup.row("Выбрать другой предмет", "Отмена")
-            
-            if data:
-                try:
-                    bot.send_message(chat_id, "Данные получены. Откройте изображение ниже", reply_markup=markup)
-                    
-                    image = create_rating_image(data, student_id, subject_name)
-                    
-                    bot.send_photo(
-                        chat_id,
-                        image,
-                        caption=f"Рейтинг по предмету: {subject_name.lower()}",
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки сообщения: {e}")
-            else:
-                try:
-                    bot.send_message(   
-                        chat_id,
-                        f"Студент {student_id} не найден в таблице по предмету '{subject_name}'.",
-                        reply_markup=markup
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки сообщения: {e}")
-            
-            with data_lock:
-                user_state[chat_id] = "choosing_subject_after_id"
-        
-        else:
-            try:
-                bot.send_message(
-                    chat_id,
-                    f"Введите число от 1 до {len(DICT_SUBJECT)}",
-                    reply_markup=create_cancel_markup()
-                )
-            except Exception as e:
-                logger.error(f"Ошибка отправки сообщения: {e}")
-    
+
     except ValueError:
-        try:
-            bot.send_message(
-                chat_id,
-                "Введите целое число (цифрой, например: 2) или используйте кнопки",
-                reply_markup=create_cancel_markup()
-            )
-        except Exception as e:
-            logger.error(f"Ошибка отправки сообщения: {e}")
+        bot.send_message(
+            chat_id,
+            "Введите номер предмета цифрой (например: 2) или используйте кнопки",
+            reply_markup=create_cancel_markup()
+        )
+        return
+
+
+    if not (1 <= choice <= len(DICT_SUBJECT)):
+        bot.send_message(
+            chat_id,
+            f"Введите число от 1 до {len(DICT_SUBJECT)}",
+            reply_markup=create_cancel_markup()
+        )
+        return
+
+    with data_lock:
+        student_id = user_selected_data[chat_id]["student_id"]
+
+    subject_name = list(DICT_SUBJECT.keys())[choice - 1]
+    object_index = DICT_SUBJECT[subject_name]
+
+    bot.send_message(
+        chat_id,
+        "Загружаем данные с сайта...\nЭто займёт около 5 секунд",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+
+    data = fetch_rating_from_site(object_index, student_id)
+
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("Выбрать другой предмет", "Отмена")
+
+    if data:
+        image = create_rating_image(data, student_id, subject_name)
+
+        bot.send_message(
+            chat_id,
+            "Данные получены. Откройте изображение ниже",
+            reply_markup=markup
+        )
+
+        bot.send_photo(
+            chat_id,
+            image,
+            caption=f"Рейтинг по предмету: {subject_name.lower()}"
+        )
+    else:
+        bot.send_message(
+            chat_id,
+            f"Студент {student_id} не найден в таблице по предмету «{subject_name}».",
+            reply_markup=markup
+        )
+
+
+    with data_lock:
+        user_state[chat_id] = "choosing_subject_after_id"
 
 # 5. ЗАПУСК
 
