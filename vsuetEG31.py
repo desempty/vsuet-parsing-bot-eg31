@@ -164,8 +164,9 @@ def parse_student_row(soup, student_id):
     link = soup.find("a", string=student_id)
     if not link:
         link = soup.find("td", string=student_id)
-    else: 
-        return
+
+    if not link:
+        return None
     
     row = link.find_parent("tr")
     cells = row.find_all("td")
@@ -385,7 +386,7 @@ def create_main_menu_markup():
 # 2.9 Функция для проверки времени
 def is_site_available():
     now = datetime.now(moscow_tz).hour
-    return 10 <= now < 19
+    return 9 <= now < 19
 
 
 # 3. ФУНКЦИИ МОНИТОРИНГА
@@ -684,47 +685,18 @@ def handle_student_id_first(message):
         logger.error(f"Ошибка отправки сообщения: {e}")
 
 # 4.6. Handler выбора предмета
-@bot.message_handler(func=lambda message: 
-    message.chat.id in user_state and 
-    user_state[message.chat.id] == "choosing_subject_after_id"
+@bot.message_handler(
+    func=lambda m: m.text and m.text.isdigit()
+    and m.chat.id in user_state
+    and user_state[m.chat.id] == "choosing_subject_after_id"
 )
 def handle_subject_choice_after_id(message):
     chat_id = message.chat.id
-    text = message.text.strip().lower()
-
     update_activity(chat_id)
 
-    if text == "выбрать другой предмет":
-        bot.send_message(
-            chat_id,
-            create_subject_menu_text(),
-            reply_markup=create_subject_keyboard()
-        )
-        return
+    logger.info(f"{chat_id} выбрал предмет: {message.text}")
 
-    if text == "отмена":
-        cleanup_on_exit(chat_id)
-        bot.send_message(
-            chat_id,
-            "Возврат в главное меню",
-            reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("Начать")
-        )
-        return
-
-    with data_lock:
-        has_session = (
-            chat_id in user_selected_data and
-            "student_id" in user_selected_data[chat_id]
-        )
-
-    if not has_session:
-        bot.send_message(
-            chat_id,
-            "Сессия устарела. Пожалуйста, начните заново командой /start",
-            reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("Начать")
-        )
-        return
-
+    # проверка времени
     if not is_site_available():
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.row("Выбрать другой предмет", "Отмена")
@@ -736,37 +708,28 @@ def handle_subject_choice_after_id(message):
         )
         return
 
-    try:
-        choice = int(text)
+    # проверка сессии
+    with data_lock:
+        if chat_id not in user_selected_data:
+            bot.send_message(
+                chat_id,
+                "Сессия устарела. Нажмите «Начать»",
+                reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add("Начать")
+            )
+            return
 
-    except ValueError:
-        bot.send_message(
-            chat_id,
-            "Введите номер предмета цифрой (например: 2) или используйте кнопки",
-            reply_markup=create_cancel_markup()
-        )
-        return
+        student_id = user_selected_data[chat_id]["student_id"]
 
+    choice = int(message.text)
 
     if not (1 <= choice <= len(DICT_SUBJECT)):
-        bot.send_message(
-            chat_id,
-            f"Введите число от 1 до {len(DICT_SUBJECT)}",
-            reply_markup=create_cancel_markup()
-        )
+        bot.send_message(chat_id, f"Введите число от 1 до {len(DICT_SUBJECT)}")
         return
-
-    with data_lock:
-        student_id = user_selected_data[chat_id]["student_id"]
 
     subject_name = list(DICT_SUBJECT.keys())[choice - 1]
     object_index = DICT_SUBJECT[subject_name]
 
-    bot.send_message(
-        chat_id,
-        "Загружаем данные с сайта...\nЭто займёт около 5 секунд",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+    bot.send_message(chat_id, "Загружаем данные...")
 
     data = fetch_rating_from_site(object_index, student_id)
 
@@ -776,27 +739,30 @@ def handle_subject_choice_after_id(message):
     if data:
         image = create_rating_image(data, student_id, subject_name)
 
-        bot.send_message(
-            chat_id,
-            "Данные получены. Откройте изображение ниже",
-            reply_markup=markup
-        )
-
         bot.send_photo(
             chat_id,
             image,
-            caption=f"Рейтинг по предмету: {subject_name.lower()}"
+            caption=f"Рейтинг по предмету: {subject_name}",
+            reply_markup=markup
         )
     else:
         bot.send_message(
             chat_id,
-            f"Студент {student_id} не найден в таблице по предмету «{subject_name}».",
+            f"Студент {student_id} не найден.",
             reply_markup=markup
         )
 
+# 4.7 Обработчик команды "Выбрать другой предмет"
+@bot.message_handler(func=lambda m: m.text == "Выбрать другой предмет")
+def handle_choose_again(message):
+    chat_id = message.chat.id
+    update_activity(chat_id)
 
-    with data_lock:
-        user_state[chat_id] = "choosing_subject_after_id"
+    bot.send_message(
+        chat_id,
+        create_subject_menu_text(),
+        reply_markup=create_subject_keyboard()
+    )
 
 # 5. ЗАПУСК
 
